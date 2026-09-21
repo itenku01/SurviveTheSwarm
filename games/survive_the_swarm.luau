@@ -43,6 +43,30 @@ pcall(function()
     end
 end)
 
+-- Universal Click / Input Simulator (firesignal + VirtualInputManager fallback)
+local function SimulateClick(gui)
+    if not gui then return end
+    pcall(function()
+        if firesignal then
+            pcall(firesignal, gui.Activated)
+            pcall(firesignal, gui.MouseButton1Click)
+            pcall(firesignal, gui.MouseButton1Down)
+            pcall(firesignal, gui.MouseButton1Up)
+        end
+    end)
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        if vim and gui:IsA("GuiObject") then
+            local pos = gui.AbsolutePosition + (gui.AbsoluteSize / 2)
+            if pos.X > 0 and pos.Y > 0 then
+                vim:SendMouseButtonEvent(pos.X, pos.Y, 0, true, game, 0)
+                task.wait(0.04)
+                vim:SendMouseButtonEvent(pos.X, pos.Y, 0, false, game, 0)
+            end
+        end
+    end)
+end
+
 -- File System Safe Wrappers
 local hasFileSystem = (writefile ~= nil and readfile ~= nil)
 local CONFIG_DIR = "SurviveTheSwarm"
@@ -504,28 +528,14 @@ local function ProcessCardDraft()
     -- If no good card (score <= 10) and Reroll is enabled & available, reroll!
     if bestScore <= 10 and State.AutoReroll and rerollButton and rerollButton.Visible then
         task.wait(State.DraftDelay)
-        pcall(function()
-            if firesignal then
-                firesignal(rerollButton.Activated)
-                firesignal(rerollButton.MouseButton1Click)
-            else
-                rerollButton:FireServer()
-            end
-        end)
+        SimulateClick(rerollButton)
         return
     end
 
     -- Otherwise pick the highest-ranked card
     if bestCard and bestCard.button then
         task.wait(State.DraftDelay)
-        pcall(function()
-            if firesignal then
-                firesignal(bestCard.button.Activated)
-                firesignal(bestCard.button.MouseButton1Click)
-            else
-                bestCard.button:FireServer()
-            end
-        end)
+        SimulateClick(bestCard.button)
     end
 end
 
@@ -801,52 +811,68 @@ task.spawn(function()
 
             -- 1. Auto Start & Auto Launch (Lobby & In-Match Drop Pod)
             if State.AutoStartGame then
-                -- Method A: Lobby Play Button
-                local playBtn = safeArea:FindFirstChild("PlayButton")
-                if playBtn and playBtn.Visible then
-                    local artBtn = playBtn:FindFirstChild("Art") or playBtn:FindFirstChildWhichIsA("GuiButton")
-                    if artBtn and artBtn.Visible then
-                        if firesignal then
-                            firesignal(artBtn.Activated)
-                            firesignal(artBtn.MouseButton1Click)
-                        end
-                    end
-                end
-
-                -- Method B: Remote StartNow invocation
+                -- Method A: Universal Screen Scan for ANY "LAUNCH" or "START RUN" or "READY" Button
                 pcall(function()
-                    local matchSvc = ReplicatedStorage:FindFirstChild("Packages") 
-                        and ReplicatedStorage.Packages:FindFirstChild("_Index")
-                    if matchSvc then
-                        for _, desc in ipairs(matchSvc:GetDescendants()) do
-                            if desc.Name == "StartNow" and desc:IsA("RemoteFunction") then
-                                desc:InvokeServer()
+                    for _, obj in ipairs(PlayerGui:GetDescendants()) do
+                        if obj.Name ~= "STS_MobileHub" and not obj:IsDescendantOf(CoreGui) then
+                            local isLaunch = false
+                            local targetBtn = nil
+
+                            -- If it's a TextLabel with "LAUNCH"
+                            if obj:IsA("TextLabel") and obj.Visible and (obj.Text:lower():find("launch") or obj.Text:lower():find("start run")) then
+                                targetBtn = obj:FindFirstAncestorWhichIsA("GuiButton") 
+                                    or (obj.Parent and obj.Parent:FindFirstChildWhichIsA("GuiButton"))
+                                    or (obj.Parent and obj.Parent.Parent and obj.Parent.Parent:FindFirstChildWhichIsA("GuiButton"))
+                                if targetBtn then
+                                    isLaunch = true
+                                end
+                            -- If it's a GuiButton with "launch" in name, text, or any child text
+                            elseif obj:IsA("GuiButton") and obj.Visible then
+                                local txt = (obj:IsA("TextButton") and obj.Text or obj.Name):lower()
+                                for _, c in ipairs(obj:GetDescendants()) do
+                                    if c:IsA("TextLabel") and c.Visible then
+                                        txt = txt .. " " .. c.Text:lower()
+                                    end
+                                end
+                                if txt:find("launch") or txt:find("start run") or txt:find("ready") then
+                                    isLaunch = true
+                                    targetBtn = obj
+                                end
+                            end
+
+                            if isLaunch and targetBtn then
+                                SimulateClick(targetBtn)
+                                break
                             end
                         end
                     end
                 end)
 
-                -- Method C: Launch / Start Run Buttons in Drop Pod / RoomPanel / Departure
-                for _, layerName in ipairs({ "RoomPanel", "DepartureLayer", "Modals", "CutsceneLayer" }) do
-                    local layer = safeArea:FindFirstChild(layerName)
-                    if layer and layer.Visible then
-                        for _, desc in ipairs(layer:GetDescendants()) do
-                            if (desc:IsA("TextButton") or desc:IsA("ImageButton")) and desc.Visible then
-                                local txt = (desc:IsA("TextButton") and desc.Text or desc.Name):lower()
-                                local lbl = desc:FindFirstChildWhichIsA("TextLabel")
-                                if lbl then txt = txt .. " " .. lbl.Text:lower() end
-
-                                if txt:find("launch") or txt:find("start run") or txt:find("ready") then
-                                    if firesignal then
-                                        firesignal(desc.Activated)
-                                        firesignal(desc.MouseButton1Click)
-                                    end
-                                    break
-                                end
-                            end
+                -- Method B: Lobby Bottom Play Button
+                if safeArea then
+                    local playBtn = safeArea:FindFirstChild("PlayButton")
+                    if playBtn and playBtn.Visible then
+                        local artBtn = playBtn:FindFirstChild("Art") or playBtn:FindFirstChildWhichIsA("GuiButton")
+                        if artBtn and artBtn.Visible then
+                            SimulateClick(artBtn)
                         end
                     end
                 end
+
+                -- Method C: Knit Controller Launch / Start Run
+                pcall(function()
+                    local PS = LocalPlayer:FindFirstChild("PlayerScripts")
+                    if PS then
+                        local RLC = PS.Client.controllers:FindFirstChild("RoomLaunchController")
+                        if RLC then
+                            local mod = require(RLC)
+                            if type(mod) == "table" then
+                                if mod.Launch then mod:Launch() end
+                                if mod.StartRun then mod:StartRun() end
+                            end
+                        end
+                    end
+                end)
             end
 
             -- 2. Match End Handler (Auto Retry / Return to Lobby)
@@ -855,48 +881,36 @@ task.spawn(function()
                 if State.StayForBonusWaves and State.BossDefeated and State.BonusWavesCleared < State.BonusWavesToClear then
                     -- Continue farming bonus waves!
                 else
-                    local searchContainers = {
-                        safeArea:FindFirstChild("WaveResult"),
-                        safeArea:FindFirstChild("Modals"),
-                        safeArea:FindFirstChild("DepartureLayer")
-                    }
-                    for _, container in ipairs(searchContainers) do
-                        if container and container.Visible then
-                            for _, desc in ipairs(container:GetDescendants()) do
-                                if (desc:IsA("TextButton") or desc:IsA("ImageButton")) and desc.Visible then
-                                    local txt = (desc:IsA("TextButton") and desc.Text or desc.Name):lower()
-                                    local lbl = desc:FindFirstChildWhichIsA("TextLabel")
-                                    if lbl then txt = txt .. " " .. lbl.Text:lower() end
+                    pcall(function()
+                        for _, desc in ipairs(PlayerGui:GetDescendants()) do
+                            if desc:IsA("GuiButton") and desc.Visible and desc.Name ~= "STS_MobileHub" and not desc:IsDescendantOf(CoreGui) then
+                                local txt = (desc:IsA("TextButton") and desc.Text or desc.Name):lower()
+                                for _, c in ipairs(desc:GetDescendants()) do
+                                    if c:IsA("TextLabel") and c.Visible then
+                                        txt = txt .. " " .. c.Text:lower()
+                                    end
+                                end
 
-                                    if State.EndGameAction == "Lobby" then
-                                        -- User chose Return to Lobby
-                                        if txt:find("return") or txt:find("lobby") or txt:find("leave") then
-                                            task.wait(0.5)
-                                            if firesignal then
-                                                firesignal(desc.Activated)
-                                                firesignal(desc.MouseButton1Click)
-                                            end
-                                            State.BossDefeated = false
-                                            State.BonusWavesCleared = 0
-                                            break
-                                        end
-                                    else
-                                        -- User chose Retry (Default)
-                                        if txt:find("retry") or txt:find("play again") or txt:find("again") or txt:find("restart") or txt:find("claim") then
-                                            task.wait(0.5)
-                                            if firesignal then
-                                                firesignal(desc.Activated)
-                                                firesignal(desc.MouseButton1Click)
-                                            end
-                                            State.BossDefeated = false
-                                            State.BonusWavesCleared = 0
-                                            break
-                                        end
+                                if State.EndGameAction == "Lobby" then
+                                    if txt:find("return") or txt:find("lobby") or txt:find("leave") then
+                                        task.wait(0.5)
+                                        SimulateClick(desc)
+                                        State.BossDefeated = false
+                                        State.BonusWavesCleared = 0
+                                        break
+                                    end
+                                else
+                                    if txt:find("retry") or txt:find("play again") or txt:find("again") or txt:find("restart") or txt:find("claim") then
+                                        task.wait(0.5)
+                                        SimulateClick(desc)
+                                        State.BossDefeated = false
+                                        State.BonusWavesCleared = 0
+                                        break
                                     end
                                 end
                             end
                         end
-                    end
+                    end)
                 end
             end
 
