@@ -616,6 +616,44 @@ RunService.Stepped:Connect(function(time, deltaTime)
     local yDiff = targetY - hrp.Position.Y
     local yVelocity = math.clamp(yDiff * 6, -State.FlySpeed, State.FlySpeed)
 
+    -- 5. Active Orb & Item Collection
+    local targetDrop = nil
+    if State.AutoOrbs and not State.IsRetreating then
+        local closestDist = math.huge
+        local candidates = {}
+
+        local xpVisuals = workspace:FindFirstChild("XpOrbVisuals")
+        if xpVisuals then
+            for _, item in ipairs(xpVisuals:GetChildren()) do
+                table.insert(candidates, item)
+            end
+        end
+
+        local raidLoot = workspace:FindFirstChild("RaidLoot")
+        if raidLoot then
+            for _, item in ipairs(raidLoot:GetChildren()) do
+                table.insert(candidates, item)
+            end
+        end
+
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if obj:IsA("BasePart") and (obj.Name:lower():find("gem") or obj.Name:lower():find("orb") or obj.Name:lower():find("coin") or obj.Name:lower():find("drop")) then
+                table.insert(candidates, obj)
+            end
+        end
+
+        for _, item in ipairs(candidates) do
+            local p = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart")
+            if p then
+                local dist = (p.Position - hrp.Position).Magnitude
+                if dist < 150 and dist < closestDist then
+                    closestDist = dist
+                    targetDrop = p
+                end
+            end
+        end
+    end
+
     -- POST-BOSS BONUS WAVES: Camp directly at Exit Pillar / Pad
     local exitPadPos, exitPadPart = nil, nil
     local tz = workspace:FindFirstChild("TeleportZones")
@@ -636,8 +674,9 @@ RunService.Stepped:Connect(function(time, deltaTime)
         end
     end
 
+    -- MOVEMENT ARBITRATION:
+    -- Case A: POST-BOSS BONUS WAVES (Camping Exit)
     if State.BossDefeated and State.CampExitOnBonus and exitPadPos then
-        -- Hover directly above Exit Pad
         local padTarget = Vector3.new(exitPadPos.X, targetY, exitPadPos.Z)
         local diff = padTarget - hrp.Position
         hrp.AssemblyLinearVelocity = Vector3.new(
@@ -659,60 +698,35 @@ RunService.Stepped:Connect(function(time, deltaTime)
             print(string.format("[STS Hub] 🚨 HP Critical (%.0f%%)! Extracted safely at Exit Pillar!", hpPercent))
             return
         end
+
+    -- Case B: ACTIVE ORB COLLECTION - Descend directly to Ground / Orb position!
+    elseif targetDrop and not State.IsRetreating then
+        local dropPos = targetDrop.Position + Vector3.new(0, 1.2, 0)
+
+        if State.CollectMode == "Teleport" then
+            -- Snap directly to the orb on the ground
+            hrp.CFrame = CFrame.new(dropPos)
+            hrp.AssemblyLinearVelocity = Vector3.zero
+        else
+            -- Glide Mode: 3D descent towards the orb
+            local diff = dropPos - hrp.Position
+            if diff.Magnitude < 4 then
+                hrp.CFrame = CFrame.new(dropPos)
+                hrp.AssemblyLinearVelocity = Vector3.zero
+            else
+                local dir = diff.Unit
+                local ySpeed = math.clamp(diff.Y * 8, -State.FlySpeed, State.FlySpeed)
+                hrp.AssemblyLinearVelocity = Vector3.new(
+                    dir.X * State.FlySpeed,
+                    ySpeed,
+                    dir.Z * State.FlySpeed
+                )
+            end
+        end
+
+    -- Case C: STANDARD HOVER - Safe Altitude above ground
     else
         hrp.AssemblyLinearVelocity = Vector3.new(0, yVelocity, 0)
-    end
-
-    -- 5. Safe Orb & Item Collection (Supports Workspace.RaidLoot + Teleport & Glide)
-    if State.AutoOrbs and not State.IsRetreating then
-        local targetDrop = nil
-        local closestDist = math.huge
-
-        local candidates = {}
-        local raidLoot = workspace:FindFirstChild("RaidLoot")
-        if raidLoot then
-            for _, item in ipairs(raidLoot:GetChildren()) do
-                table.insert(candidates, item)
-            end
-        end
-        local xpVisuals = workspace:FindFirstChild("XpOrbVisuals")
-        if xpVisuals then
-            for _, item in ipairs(xpVisuals:GetChildren()) do
-                table.insert(candidates, item)
-            end
-        end
-        for _, obj in ipairs(workspace:GetChildren()) do
-            if obj:IsA("BasePart") and (obj.Name:lower():find("gem") or obj.Name:lower():find("orb") or obj.Name:lower():find("coin") or obj.Name:lower():find("drop")) then
-                table.insert(candidates, obj)
-            end
-        end
-
-        for _, item in ipairs(candidates) do
-            local p = item:IsA("BasePart") and item or item:FindFirstChildWhichIsA("BasePart")
-            if p then
-                local dist = (p.Position - hrp.Position).Magnitude
-                if dist < 85 and dist < closestDist then
-                    closestDist = dist
-                    targetDrop = p
-                end
-            end
-        end
-
-        if targetDrop then
-            if State.CollectMode == "Teleport" then
-                -- Instant snap to touch and snap back up
-                local origCF = hrp.CFrame
-                hrp.CFrame = CFrame.new(targetDrop.Position + Vector3.new(0, 1.2, 0))
-                task.delay(0.04, function()
-                    if hrp and hrp.Parent then
-                        hrp.CFrame = CFrame.new(origCF.Position.X, targetY, origCF.Position.Z)
-                    end
-                end)
-            else
-                local dir = (targetDrop.Position - hrp.Position).Unit
-                hrp.AssemblyLinearVelocity = Vector3.new(dir.X * State.FlySpeed, yVelocity, dir.Z * State.FlySpeed)
-            end
-        end
     end
 end)
 
