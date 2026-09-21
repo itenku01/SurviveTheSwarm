@@ -672,6 +672,12 @@ RunService.Stepped:Connect(function(time, deltaTime)
                 table.insert(candidates, item)
             end
         end
+        local xpVisuals = workspace:FindFirstChild("XpOrbVisuals")
+        if xpVisuals then
+            for _, item in ipairs(xpVisuals:GetChildren()) do
+                table.insert(candidates, item)
+            end
+        end
         for _, obj in ipairs(workspace:GetChildren()) do
             if obj:IsA("BasePart") and (obj.Name:lower():find("gem") or obj.Name:lower():find("orb") or obj.Name:lower():find("coin") or obj.Name:lower():find("drop")) then
                 table.insert(candidates, obj)
@@ -872,6 +878,17 @@ task.spawn(function()
                             end
                         end
                     end
+                -- Method D: Direct DropPodService RemoteFunction Launch
+                pcall(function()
+                    local knitSvc = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("_Index")
+                    if knitSvc then
+                        local rf = knitSvc["sleitnick_knit@1.7.0"].knit.Services.DropPodService.RF:FindFirstChild("Launch")
+                        if rf and rf:IsA("RemoteFunction") then
+                            task.spawn(function()
+                                pcall(function() rf:InvokeServer() end)
+                            end)
+                        end
+                    end
                 end)
             end
 
@@ -881,6 +898,36 @@ task.spawn(function()
                 if State.StayForBonusWaves and State.BossDefeated and State.BonusWavesCleared < State.BonusWavesToClear then
                     -- Continue farming bonus waves!
                 else
+                    -- Method A: Direct DirectorService Remote Invocation
+                    pcall(function()
+                        local knitSvc = ReplicatedStorage:FindFirstChild("Packages") and ReplicatedStorage.Packages:FindFirstChild("_Index")
+                        if knitSvc then
+                            local ds = knitSvc["sleitnick_knit@1.7.0"].knit.Services:FindFirstChild("DirectorService")
+                            if ds and ds:FindFirstChild("RF") then
+                                if State.EndGameAction == "Lobby" then
+                                    local rfLobby = ds.RF:FindFirstChild("ReturnToLobby")
+                                    if rfLobby then
+                                        task.spawn(function()
+                                            pcall(function() rfLobby:InvokeServer() end)
+                                            State.BossDefeated = false
+                                            State.BonusWavesCleared = 0
+                                        end)
+                                    end
+                                else
+                                    local rfRetry = ds.RF:FindFirstChild("Retry")
+                                    if rfRetry then
+                                        task.spawn(function()
+                                            pcall(function() rfRetry:InvokeServer() end)
+                                            State.BossDefeated = false
+                                            State.BonusWavesCleared = 0
+                                        end)
+                                    end
+                                end
+                            end
+                        end
+                    end)
+
+                    -- Method B: UI Button Scan Fallback
                     pcall(function()
                         for _, desc in ipairs(PlayerGui:GetDescendants()) do
                             if desc:IsA("GuiButton") and desc.Visible and desc.Name ~= "STS_MobileHub" and not desc:IsDescendantOf(CoreGui) then
