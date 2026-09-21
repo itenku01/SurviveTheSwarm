@@ -1,0 +1,13 @@
+# Dependencies & MCP server
+roblox-executor-mcp/
+node_modules/
+
+# Agent & Workspace configs
+.agents/
+.gemini/
+.vscode/
+
+# Logs & temp files
+*.log
+scratch/
+plan/
