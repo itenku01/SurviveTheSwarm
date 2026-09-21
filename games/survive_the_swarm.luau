@@ -276,6 +276,8 @@ local State = {
     ActiveConfigName = "SSS"
 }
 
+getgenv().STS_State = State
+
 -- Helper: Save Config to File
 local function SaveConfigFile(name)
     if not hasFileSystem then return false, "No executor file system support" end
@@ -587,8 +589,19 @@ RunService.Stepped:Connect(function(time, deltaTime)
         end
     end
 
-    -- 4. Farm Movement
-    if not State.FarmEnabled then return end
+    -- 4. Farm Movement & Flight Physics Engine
+    local flightMover = hrp:FindFirstChild("STS_FlightMover")
+    if not State.FarmEnabled then
+        if flightMover then flightMover:Destroy() end
+        return
+    end
+
+    if not flightMover then
+        flightMover = Instance.new("BodyVelocity")
+        flightMover.Name = "STS_FlightMover"
+        flightMover.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+        flightMover.Parent = hrp
+    end
 
     -- Emergency Retreat Logic
     if State.IsRetreating then
@@ -676,7 +689,7 @@ RunService.Stepped:Connect(function(time, deltaTime)
     if State.BossDefeated and State.CampExitOnBonus and exitPadPos then
         local padTarget = Vector3.new(exitPadPos.X, targetY, exitPadPos.Z)
         local diff = padTarget - hrp.Position
-        hrp.AssemblyLinearVelocity = Vector3.new(
+        flightMover.Velocity = Vector3.new(
             math.clamp(diff.X * 3, -State.FlySpeed, State.FlySpeed),
             yVelocity,
             math.clamp(diff.Z * 3, -State.FlySpeed, State.FlySpeed)
@@ -703,27 +716,22 @@ RunService.Stepped:Connect(function(time, deltaTime)
         if State.CollectMode == "Teleport" then
             -- Snap directly to the orb on the ground
             hrp.CFrame = CFrame.new(dropPos)
-            hrp.AssemblyLinearVelocity = Vector3.zero
+            flightMover.Velocity = Vector3.zero
         else
             -- Glide Mode: 3D descent towards the orb
             local diff = dropPos - hrp.Position
             if diff.Magnitude < 4 then
                 hrp.CFrame = CFrame.new(dropPos)
-                hrp.AssemblyLinearVelocity = Vector3.zero
+                flightMover.Velocity = Vector3.zero
             else
                 local dir = diff.Unit
-                local ySpeed = math.clamp(diff.Y * 8, -State.FlySpeed, State.FlySpeed)
-                hrp.AssemblyLinearVelocity = Vector3.new(
-                    dir.X * State.FlySpeed,
-                    ySpeed,
-                    dir.Z * State.FlySpeed
-                )
+                flightMover.Velocity = dir * State.FlySpeed
             end
         end
 
     -- Case C: STANDARD HOVER - Safe Altitude above ground
     else
-        hrp.AssemblyLinearVelocity = Vector3.new(0, yVelocity, 0)
+        flightMover.Velocity = Vector3.new(0, yVelocity, 0)
     end
 end)
 
